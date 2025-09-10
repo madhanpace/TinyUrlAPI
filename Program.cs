@@ -1,25 +1,24 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using Serilog;
 using TinyUrlAPI.Data;
 using TinyUrlAPI.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+
 Log.Logger = new LoggerConfiguration()
-    .WriteTo.File("logs/tinyurl-log-.txt", rollingInterval: RollingInterval.Day) // log file per day
+    .WriteTo.File("logs/tinyurl-log-.txt", rollingInterval: RollingInterval.Day)
     .Enrich.FromLogContext()
     .CreateLogger();
 
 builder.Host.UseSerilog();
 
+
 builder.Services.AddDbContext<TinyUrlDbContext>(options =>
     options.UseSqlite("Data Source=tinyurl.db"));
 
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
 
 builder.Services.AddCors(options =>
 {
@@ -51,9 +50,10 @@ if (app.Environment.IsDevelopment())
 
 //app.MapGet("/", () => "TinyURL API is running!");
 
-// ------------------- API Endpoints -------------------
 
-app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db, HttpRequest request, ILogger<Program> logger) =>
+
+
+app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db,HttpRequest request, ILogger<Program> logger) =>
 {
     var shortCode = GenerateShortCode();
     var baseUrl = $"{request.Scheme}://{request.Host}";
@@ -75,27 +75,33 @@ app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db, HttpReque
 })
 .Produces<TinyUrl>(StatusCodes.Status200OK);
 
-app.MapDelete("/api/delete/{code}", async (string code, TinyUrlDbContext db) =>
+
+app.MapDelete("/api/delete/{code}", async (string code,TinyUrlDbContext db, ILogger<Program> logger) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
     if (url == null) return Results.NotFound("Not Found");
 
     db.TinyUrls.Remove(url);
     await db.SaveChangesAsync();
+
+    logger.LogInformation("Deleted URL with code: {Code}", code);
     return Results.Ok("Deleted");
 })
 .Produces<string>(StatusCodes.Status200OK);
 
 
-app.MapDelete("/api/delete-all", async (TinyUrlDbContext db) =>
+app.MapDelete("/api/delete-all", async (TinyUrlDbContext db,ILogger<Program> logger) =>
 {
     db.TinyUrls.RemoveRange(db.TinyUrls);
     await db.SaveChangesAsync();
+
+    logger.LogInformation("All URLs deleted");
     return Results.Ok("All Deleted");
 })
 .Produces<string>(StatusCodes.Status200OK);
 
-app.MapPut("/api/update/{code}", async (string code, TinyUrlAddDto dto, TinyUrlDbContext db) =>
+
+app.MapPut("/api/update/{code}", async (string code,TinyUrlAddDto dto,TinyUrlDbContext db,ILogger<Program> logger) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
     if (url == null) return Results.NotFound();
@@ -104,28 +110,34 @@ app.MapPut("/api/update/{code}", async (string code, TinyUrlAddDto dto, TinyUrlD
     url.IsPrivate = dto.IsPrivate;
     await db.SaveChangesAsync();
 
+    logger.LogInformation("Updated URL with code: {Code} -> {OriginalURL}", code, dto.OriginalURL);
     return Results.Ok(url);
 })
 .Produces<TinyUrl>(StatusCodes.Status200OK);
 
-app.MapGet("/{code}", async (string code, TinyUrlDbContext db) =>
+
+app.MapGet("/{code}", async (string code,TinyUrlDbContext db,ILogger<Program> logger) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
     if (url == null) return Results.NotFound();
 
     url.TotalClicks++;
     await db.SaveChangesAsync();
+
+    logger.LogInformation("Redirected code: {Code} -> {OriginalURL}", code, url.OriginalURL);
     return Results.Redirect(url.OriginalURL);
 })
 .Produces<string>(StatusCodes.Status302Found);
 
 
-app.MapGet("/api/public", async (TinyUrlDbContext db) =>
+app.MapGet("/api/public", async (TinyUrlDbContext db,ILogger<Program> logger) =>
 {
     var urls = await db.TinyUrls.Where(x => !x.IsPrivate).ToListAsync();
+    logger.LogInformation("Fetched public URLs: {Count}", urls.Count);
     return Results.Ok(urls);
 })
 .Produces<List<TinyUrl>>(StatusCodes.Status200OK);
+
 
 app.Run();
 
