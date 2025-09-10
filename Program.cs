@@ -1,62 +1,80 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Serilog;
 using TinyUrlAPI.Data;
 using TinyUrlAPI.Models;
 
-
 var builder = WebApplication.CreateBuilder(args);
 
-// Add DbContext with SQLite
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.File("logs/tinyurl-log-.txt", rollingInterval: RollingInterval.Day) // log file per day
+    .Enrich.FromLogContext()
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
 builder.Services.AddDbContext<TinyUrlDbContext>(options =>
     options.UseSqlite("Data Source=tinyurl.db"));
 
-// Enable Swagger
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:4200")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
 var app = builder.Build();
 
-app.MapGet("/", () => "TinyURL API is running!");
+app.UseCors();
 
 
-
-// Ensure DB is created
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<TinyUrlDbContext>();
     db.Database.EnsureCreated();
 }
 
-// Enable Swagger UI
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+//app.MapGet("/", () => "TinyURL API is running!");
+
 // ------------------- API Endpoints -------------------
 
-// POST /api/add
-app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db) =>
+app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db, HttpRequest request, ILogger<Program> logger) =>
 {
     var shortCode = GenerateShortCode();
+    var baseUrl = $"{request.Scheme}://{request.Host}";
     var tinyUrl = new TinyUrl
     {
         Code = shortCode,
         OriginalURL = dto.OriginalURL,
         IsPrivate = dto.IsPrivate,
         TotalClicks = 0,
-        ShortURL = $"{app.Urls.FirstOrDefault()}/{shortCode}"
+        ShortURL = $"{baseUrl}/{shortCode}"
     };
 
     db.TinyUrls.Add(tinyUrl);
     await db.SaveChangesAsync();
 
+    logger.LogInformation("New URL added: {ShortURL} -> {OriginalURL}", tinyUrl.ShortURL, tinyUrl.OriginalURL);
+
     return Results.Ok(tinyUrl);
 })
 .Produces<TinyUrl>(StatusCodes.Status200OK);
 
-
-// DELETE /api/delete/{code}
 app.MapDelete("/api/delete/{code}", async (string code, TinyUrlDbContext db) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
@@ -69,7 +87,6 @@ app.MapDelete("/api/delete/{code}", async (string code, TinyUrlDbContext db) =>
 .Produces<string>(StatusCodes.Status200OK);
 
 
-// DELETE /api/delete-all
 app.MapDelete("/api/delete-all", async (TinyUrlDbContext db) =>
 {
     db.TinyUrls.RemoveRange(db.TinyUrls);
@@ -78,8 +95,6 @@ app.MapDelete("/api/delete-all", async (TinyUrlDbContext db) =>
 })
 .Produces<string>(StatusCodes.Status200OK);
 
-
-// PUT /api/update/{code}
 app.MapPut("/api/update/{code}", async (string code, TinyUrlAddDto dto, TinyUrlDbContext db) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
@@ -93,8 +108,6 @@ app.MapPut("/api/update/{code}", async (string code, TinyUrlAddDto dto, TinyUrlD
 })
 .Produces<TinyUrl>(StatusCodes.Status200OK);
 
-
-// GET /{code}
 app.MapGet("/{code}", async (string code, TinyUrlDbContext db) =>
 {
     var url = await db.TinyUrls.FirstOrDefaultAsync(x => x.Code == code);
@@ -107,7 +120,6 @@ app.MapGet("/{code}", async (string code, TinyUrlDbContext db) =>
 .Produces<string>(StatusCodes.Status302Found);
 
 
-// GET /api/public
 app.MapGet("/api/public", async (TinyUrlDbContext db) =>
 {
     var urls = await db.TinyUrls.Where(x => !x.IsPrivate).ToListAsync();
@@ -115,10 +127,8 @@ app.MapGet("/api/public", async (TinyUrlDbContext db) =>
 })
 .Produces<List<TinyUrl>>(StatusCodes.Status200OK);
 
-
 app.Run();
 
-// ------------------- Helpers -------------------
 
 static string GenerateShortCode()
 {
