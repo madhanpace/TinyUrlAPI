@@ -1,0 +1,272 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Tiny URL Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            color: purple;
+            margin-bottom: 10px;
+        }
+
+        .card {
+            width: 720px;
+            margin: 0 auto 20px;
+            background: #fff;
+            padding: 18px;
+            border-radius: 12px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+            text-align: left;
+        }
+
+        input[type=text] {
+            width: 72%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+
+        label {
+            margin-left: 10px;
+            font-size: 14px;
+        }
+
+        .btn {
+            padding: 12px 22px;
+            border-radius: 10px;
+            background: linear-gradient(90deg,#ff4d6d,#9b3bfc);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .list {
+            width: 720px;
+            margin: 18px auto;
+            text-align: left;
+            max-height: 360px;
+            overflow: auto;
+        }
+
+        .item {
+            background: #fafafa;
+            margin: 10px 0;
+            padding: 12px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .meta {
+            font-size: 13px;
+            color: #666;
+            margin-top: 6px;
+        }
+
+        .right {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .small-btn {
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .copy {
+            background: #0b63ff;
+            color: #fff;
+        }
+
+        .del {
+            background: #ff4d6d;
+            color: #fff;
+        }
+
+        .badge {
+            background: #f2e8ff;
+            color: #6b3ad6;
+            padding: 6px 10px;
+            border-radius: 14px;
+            font-weight: 600;
+        }
+
+        #msg {
+            margin-top: 10px;
+            color: green;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tiny URL</h1>
+
+    <div class="card">
+        <div>
+            <input id="originalUrl" type="text" placeholder="Enter URL to shorten (e.g. example.com or https://example.com)" />
+            <label><input id="isPrivate" type="checkbox" /> IsPrivate</label>
+        </div>
+        <div style="margin-top:12px; text-align:center;">
+            <button class="btn" onclick="generateUrl()">Generate</button>
+        </div>
+        <div id="msg"></div>
+    </div>
+
+    <h2 style="color:purple;">Public URLs</h2>
+    <div style="width:720px; margin:10px auto;">
+        <input id="search" type="text" placeholder="Search URLs..." style="width:100%; padding:10px; border-radius:8px; border:1px solid #ddd" oninput="filterList()" />
+    </div>
+
+    <div class="list" id="urlList"></div>
+
+    <script>
+       
+        const apiBase = "/api";
+
+        async function generateUrl() {
+            const input = document.getElementById('originalUrl');
+            let originalUrl = input.value.trim();
+            const isPrivate = document.getElementById('isPrivate').checked;
+
+            if (!originalUrl) {
+                alert('Please enter a URL to shorten.');
+                return;
+            }
+
+            
+            if (!/^https?:\/\//i.test(originalUrl)) {
+                originalUrl = 'https://' + originalUrl;
+            }
+
+            try {
+                const res = await fetch(`${apiBase}/add`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ OriginalURL: originalUrl, IsPrivate: isPrivate })
+                });
+
+                const data = await res.json();
+                console.log('add response', res.status, data);
+
+                if (!res.ok) {
+                    const err = (data && data.title) ? data.title : JSON.stringify(data);
+                    alert('Create failed: ' + err);
+                    return;
+                }
+
+                
+                const shortUrl = data.shortURL ?? data.ShortURL ?? data.shortUrl ?? data.ShortUrl ?? data.shorturl;
+                document.getElementById('msg').textContent = 'Created: ' + (shortUrl || 'Short URL created');
+                input.value = '';
+                document.getElementById('isPrivate').checked = false;
+
+                loadUrls();
+            } catch (ex) {
+                console.error('Error creating short url', ex);
+                alert('Error: ' + ex.message);
+            }
+        }
+
+        async function loadUrls() {
+            try {
+                const res = await fetch(`${apiBase}/public`);
+                const data = await res.json();
+                console.log('/api/public =>', res.status, data);
+
+                if (!res.ok) {
+                    alert('Failed to load URLs');
+                    return;
+                }
+
+                renderList(data || []);
+            } catch (ex) {
+                console.error('Error loading urls', ex);
+                alert('Error loading URLs: ' + ex.message);
+            }
+        }
+
+        function renderList(items) {
+            const container = document.getElementById('urlList');
+            container.innerHTML = '';
+            window._tinyUrls = items; // for filter
+            items.forEach(u => {
+                const code = u.code ?? u.Code ?? (() => {
+                    
+                    const s = u.shortURL ?? u.ShortURL ?? u.ShortUrl ?? u.Shorturl ?? '';
+                    const parts = s.split('/');
+                    return parts[parts.length - 1] || '';
+                })();
+
+                const short = u.shortURL ?? u.ShortURL ?? u.ShortUrl ?? '';
+                const orig = u.originalURL ?? u.OriginalURL ?? u.OriginalUrl ?? u.originalUrl ?? '';
+
+                const div = document.createElement('div');
+                div.className = 'item';
+                div.innerHTML = `
+            <div style="max-width:66%">
+              <a href="${short || '/' + code}" target="_blank" style="font-weight:700; color:#1656c8; text-decoration:underline;">${short || ('/' + code)}</a>
+              <div class="meta">${orig}</div>
+            </div>
+            <div class="right">
+              <button class="small-btn copy" onclick="copyText('${short || ('/' + code)}')">Copy</button>
+              <span class="badge">${u.totalClicks ?? u.TotalClicks ?? 0} clicks</span>
+              <button class="small-btn del" onclick="deleteUrl('${code}')">Delete</button>
+            </div>
+          `;
+                container.appendChild(div);
+            });
+        }
+
+        function copyText(text) {
+            navigator.clipboard?.writeText(text).then(() => {
+                alert('Copied: ' + text);
+            }).catch(() => {
+                prompt('Copy this URL', text);
+            });
+        }
+
+        async function deleteUrl(code) {
+            if (!confirm('Delete this short URL?')) return;
+            try {
+                const res = await fetch(`${apiBase}/delete/${encodeURIComponent(code)}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    alert('Delete failed: ' + (data?.title ?? res.statusText));
+                    return;
+                }
+                loadUrls();
+            } catch (ex) {
+                console.error('delete error', ex);
+                alert('Delete error: ' + ex.message);
+            }
+        }
+
+        function filterList() {
+            const q = document.getElementById('search').value.trim().toLowerCase();
+            const items = window._tinyUrls || [];
+            if (!q) return renderList(items);
+            renderList(items.filter(u => {
+                const s = (u.originalURL ?? u.OriginalURL ?? u.originalUrl ?? '').toLowerCase();
+                const short = (u.shortURL ?? u.ShortURL ?? '').toLowerCase();
+                return s.includes(q) || short.includes(q);
+            }));
+        }
+
+        // initial load
+        loadUrls();
+    </script>
+</body>
+</html>

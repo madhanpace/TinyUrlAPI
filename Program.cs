@@ -3,19 +3,17 @@ using Serilog;
 using TinyUrlAPI.Data;
 using TinyUrlAPI.Models;
 
+
+
+Log.Logger = new LoggerConfiguration().WriteTo.File("logs/tinyurl-log-.txt", rollingInterval: RollingInterval.Day)
+    .Enrich.FromLogContext().CreateLogger();
+
 var builder = WebApplication.CreateBuilder(args);
-
-
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.File("logs/tinyurl-log-.txt", rollingInterval: RollingInterval.Day)
-    .Enrich.FromLogContext()
-    .CreateLogger();
 
 builder.Host.UseSerilog();
 
 
-builder.Services.AddDbContext<TinyUrlDbContext>(options =>
-    options.UseSqlite("Data Source=tinyurl.db"));
+builder.Services.AddDbContext<TinyUrlDbContext>(options => options.UseSqlite("Data Source=tinyurl.db"));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -45,13 +43,20 @@ using (var scope = app.Services.CreateScope())
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "TinyURL API V1");
+        c.RoutePrefix = "swagger";
+    });
 }
+
+app.UseDefaultFiles();  
+app.UseStaticFiles();   
 
 //app.MapGet("/", () => "TinyURL API is running!");
 
 
-
+var secretToken = builder.Configuration["SecretToken"];
 
 app.MapPost("/api/add", async (TinyUrlAddDto dto, TinyUrlDbContext db,HttpRequest request, ILogger<Program> logger) =>
 {
@@ -125,7 +130,7 @@ app.MapGet("/{code}", async (string code,TinyUrlDbContext db,ILogger<Program> lo
     await db.SaveChangesAsync();
 
     logger.LogInformation("Redirected code: {Code} -> {OriginalURL}", code, url.OriginalURL);
-    return Results.Redirect(url.OriginalURL);
+    return Results.Redirect(url.OriginalURL, false);
 })
 .Produces<string>(StatusCodes.Status302Found);
 
@@ -139,12 +144,13 @@ app.MapGet("/api/public", async (TinyUrlDbContext db,ILogger<Program> logger) =>
 .Produces<List<TinyUrl>>(StatusCodes.Status200OK);
 
 
+
 app.Run();
 
 
 static string GenerateShortCode()
 {
-    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     var random = new Random();
     return new string(Enumerable.Range(0, 6)
         .Select(_ => chars[random.Next(chars.Length)]).ToArray());
